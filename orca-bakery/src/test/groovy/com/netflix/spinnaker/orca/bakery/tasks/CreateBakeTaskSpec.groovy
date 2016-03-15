@@ -16,20 +16,13 @@
 
 package com.netflix.spinnaker.orca.bakery.tasks
 
-import com.netflix.spinnaker.orca.bakery.api.BaseImage
-import com.netflix.spinnaker.orca.pipeline.model.Orchestration
-import com.netflix.spinnaker.orca.pipeline.model.OrchestrationStage
-import com.netflix.spinnaker.orca.pipeline.util.PackageType
-
-import static com.netflix.spinnaker.orca.bakery.api.BakeStatus.State.COMPLETED
-
 import com.netflix.spinnaker.orca.bakery.api.BakeRequest
 import com.netflix.spinnaker.orca.bakery.api.BakeStatus
 import com.netflix.spinnaker.orca.bakery.api.BakeryService
+import com.netflix.spinnaker.orca.bakery.api.BaseImage
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
-import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.model.*
+import com.netflix.spinnaker.orca.pipeline.util.PackageType
 import retrofit.RetrofitError
 import retrofit.client.Response
 import retrofit.mime.TypedString
@@ -38,6 +31,7 @@ import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Subject
 import spock.lang.Unroll
+import static com.netflix.spinnaker.orca.bakery.api.BakeStatus.State.COMPLETED
 import static com.netflix.spinnaker.orca.bakery.api.BakeStatus.State.RUNNING
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND
 import static java.util.UUID.randomUUID
@@ -213,7 +207,7 @@ class CreateBakeTaskSpec extends Specification {
 
   def setup() {
     task.mapper = mapper
-    stage = new PipelineStage(pipeline, "bake", bakeConfig).asImmutable()
+    stage = new PipelineStage(pipeline, "bake", bakeConfig)
   }
 
   def "creates a bake for the correct region"() {
@@ -268,7 +262,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     def bake
     task.bakery = Mock(BakeryService) {
       1 * createBake(*_) >> {
@@ -297,7 +291,7 @@ class CreateBakeTaskSpec extends Specification {
   def "fails if pipeline trigger or context includes artifacts but no artifact for the bake package"() {
     given:
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     bakeConfig.buildInfo = contextInfo
 
     when:
@@ -320,7 +314,7 @@ class CreateBakeTaskSpec extends Specification {
   def "fails if pipeline trigger and context includes artifacts have a different match"() {
     given:
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: buildInfo]).build()
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     bakeConfig.buildInfo = [
       artifacts: [
         [fileName: 'hodor_1.2_all.deb'],
@@ -371,7 +365,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -401,7 +395,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -429,7 +423,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -457,7 +451,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -485,7 +479,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -515,7 +509,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
     task.extractBuildDetails = true
 
@@ -548,7 +542,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -580,7 +574,7 @@ class CreateBakeTaskSpec extends Specification {
     Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig).asImmutable()
+    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -609,7 +603,7 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "propagation of cloudProviderType is feature-flagged"() {
     given:
-    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithCloudProviderType).asImmutable()
+    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithCloudProviderType)
     def bake
     task.bakery = Mock(BakeryService) {
       1 * createBake(*_) >> {
@@ -638,7 +632,7 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "propagation of templateFileName, extendedAttributes and buildInfoUrl is feature-flagged"() {
     given:
-    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithTemplateFileNameExtendedAttributesAndBuildInfoUrl).asImmutable()
+    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithTemplateFileNameExtendedAttributesAndBuildInfoUrl)
     def bake
     task.bakery = Mock(BakeryService) {
       if (roscoApisEnabled) {
@@ -693,7 +687,7 @@ class CreateBakeTaskSpec extends Specification {
 
   def "sets rebake query parameter if rebake flag is set in job context"() {
     given:
-    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithRebake).asImmutable()
+    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithRebake)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -715,7 +709,7 @@ class CreateBakeTaskSpec extends Specification {
   def "sets rebake query parameter to #queryParameter when trigger is #trigger"() {
     given:
     Pipeline pipeline = Pipeline.builder().withTrigger(trigger).build()
-    Stage pipelineStage = new PipelineStage(pipeline, "bake", bakeConfig).asImmutable()
+    Stage pipelineStage = new PipelineStage(pipeline, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
