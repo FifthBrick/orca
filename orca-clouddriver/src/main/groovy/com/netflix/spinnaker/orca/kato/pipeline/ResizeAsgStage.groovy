@@ -26,6 +26,7 @@ import com.netflix.spinnaker.orca.kato.pipeline.support.ResizeSupport
 import com.netflix.spinnaker.orca.kato.pipeline.support.TargetReferenceSupport
 import com.netflix.spinnaker.orca.kato.tasks.ResizeAsgTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
@@ -52,7 +53,7 @@ class ResizeAsgStage implements StageDefinitionBuilder {
   DetermineTargetReferenceStage determineTargetReferenceStage
 
   @Override
-  <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
     if (!parentStage.parentStageId || parentStage.execution.stages.find {
       it.id == parentStage.parentStageId
     }.type != parentStage.type) {
@@ -60,15 +61,14 @@ class ResizeAsgStage implements StageDefinitionBuilder {
 
       // mark as SUCCEEDED otherwise a stage w/o child tasks will remain in NOT_STARTED
       parentStage.status = ExecutionStatus.SUCCEEDED
-      return []
+      return
     }
 
-    return [
-      new StageDefinitionBuilder.TaskDefinition("resizeAsg", ResizeAsgTask),
-      new StageDefinitionBuilder.TaskDefinition("monitorAsg", MonitorKatoTask),
-      new StageDefinitionBuilder.TaskDefinition("forceCacheRefresh", ServerGroupCacheForceRefreshTask),
-      new StageDefinitionBuilder.TaskDefinition("waitForCapacityMatch", WaitForCapacityMatchTask)
-    ]
+    builder
+      .withTask("resizeAsg", ResizeAsgTask)
+      .withTask("monitorAsg", MonitorKatoTask)
+      .withTask("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
+      .withTask("waitForCapacityMatch", WaitForCapacityMatchTask)
   }
 
   @Override

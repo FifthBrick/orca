@@ -24,7 +24,7 @@ import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.Targe
 import com.netflix.spinnaker.orca.kato.pipeline.strategy.DetermineSourceServerGroupTask
 import com.netflix.spinnaker.orca.kato.pipeline.support.StageData
 import com.netflix.spinnaker.orca.kato.tasks.DiffTask
-import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
@@ -54,18 +54,18 @@ abstract class AbstractDeployStrategyStage extends AbstractCloudProviderAwareSta
    * @return the steps for the stage excluding whatever cleanup steps will be
    * handled by the deployment strategy.
    */
-  protected abstract List<StageDefinitionBuilder.TaskDefinition> basicTasks(Stage stage)
+  protected
+  abstract List<TaskNode.TaskDefinition> basicTasks(Stage stage)
 
   @Override
-  def <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
-    def tasks = [
-      // TODO(ttomsu): This is currently an AWS-only stage. I need to add and support the "useSourceCapacity" option.
-      new StageDefinitionBuilder.TaskDefinition("determineSourceServerGroup", DetermineSourceServerGroupTask)
-    ]
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
+    builder
+    // TODO(ttomsu): This is currently an AWS-only stage. I need to add and support the "useSourceCapacity" option.
+      .withTask("determineSourceServerGroup", DetermineSourceServerGroupTask)
 
     deployStagePreProcessors.findAll { it.supports(parentStage) }.each {
       it.additionalSteps().each {
-        tasks << new StageDefinitionBuilder.TaskDefinition(it.name, it.taskClass)
+        builder.withTask(it.name, it.taskClass)
       }
     }
 
@@ -74,24 +74,24 @@ abstract class AbstractDeployStrategyStage extends AbstractCloudProviderAwareSta
       it.name.equalsIgnoreCase(parentStage.context.strategy) ? it : null
     })
     if (!strategy.replacesBasicSteps()) {
-      tasks.addAll((basicTasks(parentStage) ?: []))
+      (basicTasks(parentStage) ?: []).each {
+        builder.withTask(it.name, it.implementingClass)
+      }
 
       if (diffTasks) {
         diffTasks.each { DiffTask diffTask ->
           try {
-            tasks << new StageDefinitionBuilder.TaskDefinition(getDiffTaskName(diffTask.class.simpleName), diffTask.class)
+            builder.withTask(getDiffTaskName(diffTask.class.simpleName), diffTask.class)
           } catch (Exception e) {
             log.error("Unable to build diff task (name: ${diffTask.class.simpleName}: executionId: ${stage.execution.id})", e)
           }
         }
       }
     }
-
-    return tasks
   }
 
   @Override
-  def <T extends Execution> List<Stage<T>> aroundStages(Stage<T> parentStage) {
+  def <T extends Execution<T>> List<Stage<T>> aroundStages(Stage<T> parentStage) {
     correctContext(parentStage)
     Strategy strategy = (Strategy) strategies.findResult(noStrategy, {
       it.name.equalsIgnoreCase(parentStage.context.strategy) ? it : null
@@ -146,7 +146,8 @@ abstract class AbstractDeployStrategyStage extends AbstractCloudProviderAwareSta
     try {
       className = className[0].toLowerCase() + className.substring(1)
       className = className.replaceAll("Task", "")
-    } catch (e) {}
+    } catch (e) {
+    }
     return className
   }
 
@@ -161,10 +162,10 @@ abstract class AbstractDeployStrategyStage extends AbstractCloudProviderAwareSta
       def stageData = stage.mapTo(StageData)
       def loc = TargetServerGroup.Support.locationFromStageData(stageData)
       new CleanupConfig(
-          account: stageData.account,
-          cluster: stageData.cluster,
-          cloudProvider: stageData.cloudProvider,
-          location: loc
+        account: stageData.account,
+        cluster: stageData.cluster,
+        cloudProvider: stageData.cloudProvider,
+        location: loc
       )
     }
   }

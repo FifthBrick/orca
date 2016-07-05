@@ -22,6 +22,7 @@ import com.netflix.spinnaker.orca.clouddriver.tasks.cluster.AbstractClusterWideC
 import com.netflix.spinnaker.orca.clouddriver.tasks.cluster.AbstractWaitForClusterWideClouddriverTask
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.ServerGroupCacheForceRefreshTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 
@@ -38,7 +39,7 @@ abstract class AbstractClusterWideClouddriverOperationStage implements StageDefi
   }
 
   @Override
-  def <T extends Execution<T>> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
     parentStage.resolveStrategyParams()
     def operationTask = clusterOperationTask
     String name = getStepName(operationTask.simpleName)
@@ -46,12 +47,11 @@ abstract class AbstractClusterWideClouddriverOperationStage implements StageDefi
     def waitTask = waitForTask
     String waitName = Introspector.decapitalize(getStepName(waitTask.simpleName))
 
-    return [
-      new StageDefinitionBuilder.TaskDefinition(opName, operationTask),
-      new StageDefinitionBuilder.TaskDefinition("monitor${name}", MonitorKatoTask),
-      new StageDefinitionBuilder.TaskDefinition("forceCacheRefresh", ServerGroupCacheForceRefreshTask),
-      new StageDefinitionBuilder.TaskDefinition(waitName, waitTask),
-      new StageDefinitionBuilder.TaskDefinition("forceCacheRefresh", ServerGroupCacheForceRefreshTask),
-    ]
+    builder
+      .withTask(opName, operationTask)
+      .withTask("monitor${name}", MonitorKatoTask)
+      .withTask("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
+      .withTask(waitName, waitTask)
+      .withTask("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
   }
 }

@@ -16,7 +16,10 @@
 
 package com.netflix.spinnaker.orca.batch.pipeline
 
+import groovy.transform.CompileStatic
+import com.netflix.spinnaker.orca.Task
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
@@ -50,10 +53,10 @@ class TestStage implements StageDefinitionBuilder {
   }
 
   @Override
-  <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
-    def i = 1
-    return tasks.collect {
-      new StageDefinitionBuilder.TaskDefinition("task${i++}", it.class)
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
+    tasks.eachWithIndex { task, i ->
+      builder
+        .withTask("task${i + 1}", task.getClass() as Class<? extends Task>)
     }
   }
 }

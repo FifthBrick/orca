@@ -17,19 +17,17 @@
 package com.netflix.spinnaker.orca.batch;
 
 import java.io.Serializable;
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import com.netflix.spinnaker.orca.pipeline.ExecutionRunnerSupport;
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder;
 import com.netflix.spinnaker.orca.pipeline.model.*;
 import com.netflix.spinnaker.orca.pipeline.parallel.WaitForRequisiteCompletionStage;
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobParameters;
-import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.Step;
+import org.springframework.batch.core.*;
 import org.springframework.batch.core.configuration.DuplicateJobException;
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
@@ -42,10 +40,14 @@ import org.springframework.batch.core.job.flow.Flow;
 import org.springframework.batch.core.job.flow.support.SimpleFlow;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.NoSuchJobException;
+import org.springframework.batch.core.listener.StepExecutionListenerSupport;
 import org.springframework.batch.core.step.builder.TaskletStepBuilder;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import static com.google.common.collect.Iterables.indexOf;
 import static com.google.common.collect.Maps.newHashMap;
+import static com.netflix.spinnaker.orca.ExecutionStatus.NOT_STARTED;
+import static com.netflix.spinnaker.orca.ExecutionStatus.REDIRECT;
 import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.StageDefinitionBuilderSupport.newStage;
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_AFTER;
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE;
@@ -65,7 +67,7 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
   private final JobBuilderFactory jobs;
   private final StepBuilderFactory steps;
   private final TaskTaskletAdapter taskTaskletAdapter;
-  private final Map<Class, com.netflix.spinnaker.orca.Task> tasks;
+  private final Collection<com.netflix.spinnaker.orca.Task> tasks;
   private final ExecutionListenerProvider executionListenerProvider;
 
   public SpringBatchExecutionRunner(
@@ -86,9 +88,7 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
     this.jobs = jobs;
     this.steps = steps;
     this.taskTaskletAdapter = taskTaskletAdapter;
-    this.tasks = tasks.stream().collect(Collectors.toMap(
-      com.netflix.spinnaker.orca.Task::getClass, Function.identity())
-    );
+    this.tasks = tasks;
     this.executionListenerProvider = executionListenerProvider;
   }
 
@@ -264,8 +264,23 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
   }
 
   private <E extends Execution<E>, Q> FlowBuilder<Q> addStepsToFlow(FlowBuilder<Q> flow, Stage<E> stage) {
+    Step loopStart = null;
+    Step loopEnd = null;
     for (Task task : stage.getTasks()) {
-      flow = flow.next(buildStepForTask(stage, task));
+      Step step = buildStepForTask(stage, task);
+      if (task.isLoopStart()) {
+        loopStart = step;
+      }
+      if (task.isLoopEnd()) {
+        loopEnd = step;
+      }
+      flow = flow.next(step);
+      if (task.isLoopEnd()) {
+        flow = flow
+          .on(REDIRECT.name())
+          .to(loopStart)
+          .from(loopEnd);
+      }
     }
     return flow;
   }
@@ -279,6 +294,10 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
       .allStepExecutionListeners()
       .forEach(stepBuilder::listener);
 
+    if (task.isLoopEnd()) {
+      stepBuilder.listener(new LoopResetListener<>(executionRepository, stage));
+    }
+
     return stepBuilder.build();
   }
 
@@ -287,7 +306,13 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
   }
 
   private Tasklet buildTaskletForTask(Task task) {
-    return taskTaskletAdapter.decorate(tasks.get(task.getImplementingClass()));
+    Class<? extends com.netflix.spinnaker.orca.Task> type = task.getImplementingClass();
+    return tasks
+      .stream()
+      .filter(it -> type.isAssignableFrom(it.getClass()))
+      .findFirst()
+      .map(taskTaskletAdapter::decorate)
+      .orElseThrow(() -> new IllegalStateException(format("No Task implementing %s found", type.getName())));
   }
 
   private <E extends Execution> String jobNameFor(E execution) {
@@ -329,6 +354,28 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
         super.next(step);
       }
       return this;
+    }
+  }
+
+  private static class LoopResetListener<E extends Execution<E>> extends StepExecutionListenerSupport {
+    private final ExecutionRepository executionRepository;
+    private final Stage<E> stage;
+
+    private LoopResetListener(ExecutionRepository executionRepository, Stage<E> stage) {
+      this.executionRepository = executionRepository;
+      this.stage = stage;
+    }
+
+    @Override public ExitStatus afterStep(StepExecution stepExecution) {
+      int startIndex = indexOf(stage.getTasks(), Task::isLoopStart);
+      int endIndex = indexOf(stage.getTasks(), Task::isLoopEnd);
+      for (Task task : stage.getTasks().subList(startIndex, endIndex + 1)) {
+        log.info(format("Resetting task %s for repeat of loop", task.getName()));
+        task.setStatus(NOT_STARTED);
+        task.setEndTime(null);
+      }
+      executionRepository.storeStage(stage);
+      return super.afterStep(stepExecution);
     }
   }
 }

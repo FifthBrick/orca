@@ -16,26 +16,26 @@
 
 package com.netflix.spinnaker.orca.clouddriver.pipeline.instance
 
+import groovy.transform.CompileStatic
 import com.netflix.spinnaker.orca.clouddriver.tasks.MonitorKatoTask
 import com.netflix.spinnaker.orca.clouddriver.tasks.instance.RebootInstancesTask
 import com.netflix.spinnaker.orca.clouddriver.tasks.instance.WaitForDownInstanceHealthTask
 import com.netflix.spinnaker.orca.clouddriver.tasks.instance.WaitForUpInstanceHealthTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
-import groovy.transform.CompileStatic
 import org.springframework.stereotype.Component
 
 @Component
 @CompileStatic
 class RebootInstancesStage implements StageDefinitionBuilder {
   @Override
-  <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
-    return [
-      new StageDefinitionBuilder.TaskDefinition("rebootInstances", RebootInstancesTask),
-      new StageDefinitionBuilder.TaskDefinition("monitorReboot", MonitorKatoTask),
-      new StageDefinitionBuilder.TaskDefinition("waitForDownInstances", WaitForDownInstanceHealthTask),
-      new StageDefinitionBuilder.TaskDefinition("waitForUpInstances", WaitForUpInstanceHealthTask)
-    ]
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
+    builder
+      .withTask("rebootInstances", RebootInstancesTask)
+      .withTask("monitorReboot", MonitorKatoTask)
+      .withTask("waitForDownInstances", WaitForDownInstanceHealthTask)
+      .withTask("waitForUpInstances", WaitForUpInstanceHealthTask)
   }
 }

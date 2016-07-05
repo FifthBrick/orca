@@ -16,6 +16,7 @@
 
 package com.netflix.spinnaker.orca.batch
 
+import groovy.transform.CompileStatic
 import groovy.transform.stc.ClosureParams
 import groovy.transform.stc.SimpleType
 import com.netflix.spinnaker.orca.DefaultTaskResult
@@ -30,31 +31,42 @@ import com.netflix.spinnaker.orca.listeners.StageTaskPropagationListener
 import com.netflix.spinnaker.orca.pipeline.ExecutionRunner
 import com.netflix.spinnaker.orca.pipeline.ExecutionRunnerSpec
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
 import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.parallel.WaitForRequisiteCompletionStage
 import com.netflix.spinnaker.orca.pipeline.parallel.WaitForRequisiteCompletionTask
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
+import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
 import com.netflix.spinnaker.orca.test.batch.BatchTestConfiguration
 import org.springframework.batch.core.configuration.JobRegistry
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory
 import org.springframework.batch.core.launch.JobLauncher
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.retry.backoff.Sleeper
+import spock.lang.Shared
 import spock.lang.Subject
 import spock.lang.Unroll
+import static com.netflix.spinnaker.orca.ExecutionStatus.REDIRECT
 import static com.netflix.spinnaker.orca.ExecutionStatus.SUCCEEDED
+import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.StageDefinitionBuilderSupport.getType
 import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.StageDefinitionBuilderSupport.newStage
-import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.TaskDefinition
+import static com.netflix.spinnaker.orca.pipeline.TaskNode.TaskDefinition
+import static com.netflix.spinnaker.orca.pipeline.TaskNode.TaskGraph
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_AFTER
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE
 import static org.hamcrest.Matchers.containsInAnyOrder
 import static spock.util.matcher.HamcrestSupport.expect
 
 class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
+
+  @Shared
+  def stageNavigator = new StageNavigator(Mock(ApplicationContext))
 
   def applicationContext = new AnnotationConfigApplicationContext()
   @Autowired JobRegistry jobRegistry
@@ -63,8 +75,13 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
   @Autowired TaskTaskletAdapter taskTaskletAdapter
   @Autowired(required = false) Collection<Task> tasks = []
   @Autowired(required = false) Collection<TestTask> mockTasks = []
+
+  private Map<Class<? extends Task>, TestTask> getTasksByType() {
+    mockTasks.collectEntries { [(it.getClass()): it] }
+  }
   @Autowired(required = false) Collection<StageListener> stageListeners = []
-  @Autowired(required = false) Collection<ExecutionListener> executionListeners = []
+  @Autowired(required = false)
+  Collection<ExecutionListener> executionListeners = []
   @Autowired JobLauncher jobLauncher
   def executionRepository = Stub(ExecutionRepository)
 
@@ -78,6 +95,8 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
       beanFactory.with {
         registerSingleton("executionRepository", executionRepository)
         registerSingleton("exceptionHandler", Mock(ExceptionHandler))
+        registerSingleton("stageBuilderProvider", Stub(StageBuilderProvider))
+        registerSingleton("stageNavigator", new StageNavigator(applicationContext))
         registerSingleton("sleeper", Stub(Sleeper))
         registerSingleton("waitForRequisiteCompletionTask", new WaitForRequisiteCompletionTask())
         registerSingleton("stageStatusPropagationListener", new SpringBatchStageListener(executionRepository, new StageStatusPropagationListener()))
@@ -94,6 +113,10 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
   ExecutionRunner create(StageDefinitionBuilder... stageDefBuilders) {
     startContext { beanFactory ->
       beanFactory.registerSingleton("test", new TestTask(delegate: Mock(Task)))
+      beanFactory.registerSingleton("preLoop", new PreLoopTask(delegate: Mock(Task)))
+      beanFactory.registerSingleton("startLoop", new StartLoopTask(delegate: Mock(Task)))
+      beanFactory.registerSingleton("endLoop", new EndLoopTask(delegate: Mock(Task)))
+      beanFactory.registerSingleton("postLoop", new PostLoopTask(delegate: Mock(Task)))
     }
     return new SpringBatchExecutionRunner(
       stageDefBuilders.toList() + [new WaitForRequisiteCompletionStage()],
@@ -117,7 +140,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     and:
     def stageDefinitionBuilder = Stub(StageDefinitionBuilder) {
       getType() >> stageType
-      taskGraph(_) >> [new TaskDefinition("test", TestTask)]
+      buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("test", TestTask)])
     }
     @Subject runner = create(stageDefinitionBuilder)
 
@@ -146,7 +169,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     def stageDefinitionBuilders = [
       Stub(StageDefinitionBuilder) {
         getType() >> stageType
-        taskGraph(_) >> [new TaskDefinition("test", TestTask)]
+        buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("test", TestTask)])
         aroundStages(_) >> { Stage<Pipeline> parentStage ->
           [
             newStage(execution, "before_${stageType}_2", "before", [:], parentStage, STAGE_BEFORE),
@@ -157,15 +180,15 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
       },
       Stub(StageDefinitionBuilder) {
         getType() >> "before_${stageType}_1"
-        taskGraph(_) >> [new TaskDefinition("before_test_1", TestTask)]
+        buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("before_test_1", TestTask)])
       },
       Stub(StageDefinitionBuilder) {
         getType() >> "before_${stageType}_2"
-        taskGraph(_) >> [new TaskDefinition("before_test_2", TestTask)]
+        buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("before_test_2", TestTask)])
       },
       Stub(StageDefinitionBuilder) {
         getType() >> "after_$stageType"
-        taskGraph(_) >> [new TaskDefinition("after_test", TestTask)]
+        buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("after_test", TestTask)])
       }
     ]
     @Subject runner = create(*stageDefinitionBuilders)
@@ -192,6 +215,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     execution = Pipeline.builder().withId("1").withStage(stageType).withParallel(parallel).build()
   }
 
+  // TODO: push up to superclass
   def "executes stage graph in the correct order"() {
     given:
     def startStage = new PipelineStage(execution, "start")
@@ -217,21 +241,18 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     executionRepository.retrievePipeline(execution.id) >> execution
 
     and:
-    def startStageDefinitionBuilder = Stub(StageDefinitionBuilder) {
-      getType() >> startStage.type
-      taskGraph(_) >> [new TaskDefinition("test", TestTask)]
-    }
+    def startStageDefinitionBuilder = stageDefinition(startStage.type) { builder -> builder.withTask("test", TestTask) }
     def branchAStageDefinitionBuilder = Stub(StageDefinitionBuilder) {
       getType() >> branchAStage.type
-      taskGraph(_) >> [new TaskDefinition("test", TestTask)]
+      buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("test", TestTask)])
     }
     def branchBStageDefinitionBuilder = Stub(StageDefinitionBuilder) {
       getType() >> branchBStage.type
-      taskGraph(_) >> [new TaskDefinition("test", TestTask)]
+      buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("test", TestTask)])
     }
     def endStageDefinitionBuilder = Stub(StageDefinitionBuilder) {
       getType() >> endStage.type
-      taskGraph(_) >> [new TaskDefinition("test", TestTask)]
+      buildTaskGraph(_) >> new TaskGraph([new TaskDefinition("test", TestTask)])
     }
     @Subject runner = create(startStageDefinitionBuilder, branchAStageDefinitionBuilder, branchBStageDefinitionBuilder, endStageDefinitionBuilder)
 
@@ -254,8 +275,77 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     execution = Pipeline.builder().withId("1").withParallel(true).build()
   }
 
+  def "executes loops"() {
+    given:
+    def stage = new PipelineStage(execution, "looping")
+    execution.stages << stage
+
+    executionRepository.retrievePipeline(execution.id) >> execution
+
+    and:
+    def stageDefinitionBuilder = stageDefinition("looping") { builder ->
+      builder
+        .withTask("preLoop", PreLoopTask)
+        .withLoop({ subGraph ->
+        subGraph
+          .withTask("startLoop", StartLoopTask)
+          .withTask("endLoop", EndLoopTask)
+      })
+        .withTask("postLoop", PostLoopTask)
+    }
+    @Subject runner = create(stageDefinitionBuilder)
+
+    when:
+    runner.start(execution)
+
+    then:
+    // TODO: make this a field
+    1 * tasksByType[PreLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    3 * tasksByType[StartLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    3 * tasksByType[EndLoopTask].delegate.execute(_) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(SUCCEEDED)
+    1 * tasksByType[PostLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+
+    where:
+    execution = Pipeline.builder().withId("1").withParallel(true).build()
+  }
+
+  @CompileStatic
   static class TestTask implements Task {
     @Delegate
     Task delegate
   }
+
+  @CompileStatic
+  static class PreLoopTask extends TestTask {}
+
+  @CompileStatic
+  static class StartLoopTask extends TestTask {}
+
+  @CompileStatic
+  static class EndLoopTask extends TestTask {}
+
+  @CompileStatic
+  static class PostLoopTask extends TestTask {}
+
+  @CompileStatic
+  static StageDefinitionBuilder stageDefinition(
+    String name,
+    @ClosureParams(
+      value = SimpleType,
+      options = "com.netflix.spinnaker.orca.pipeline.TaskNode.Builder"
+    )
+      Closure<Void> closure) {
+    return new StageDefinitionBuilder() {
+      @Override
+      public <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
+        closure(builder)
+      }
+
+      @Override
+      String getType() {
+        name
+      }
+    }
+  }
+
 }

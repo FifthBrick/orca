@@ -20,13 +20,18 @@ import java.util.*;
 import com.netflix.spinnaker.orca.ExecutionStatus;
 import com.netflix.spinnaker.orca.pipeline.model.*;
 import com.netflix.spinnaker.security.AuthenticatedRequest;
-import lombok.Value;
+import static com.netflix.spinnaker.orca.pipeline.TaskNode.Builder;
 import static java.util.Collections.emptyList;
 
 public interface StageDefinitionBuilder {
 
-  default <T extends Execution<T>> List<TaskDefinition> taskGraph(Stage<T> parentStage) {
-    return emptyList();
+  default <T extends Execution<T>> TaskNode.TaskGraph buildTaskGraph(Stage<T> parentStage) {
+    Builder graphBuilder = Builder();
+    taskGraph(parentStage, graphBuilder);
+    return graphBuilder.build();
+  }
+
+  default <T extends Execution<T>> void taskGraph(Stage<T> parentStage, Builder builder) {
   }
 
   default <T extends Execution<T>> List<Stage<T>> aroundStages(Stage<T> parentStage) {
@@ -42,12 +47,6 @@ public interface StageDefinitionBuilder {
 
   default Stage prepareStageForRestart(Stage stage) {
     return StageDefinitionBuilderSupport.prepareStageForRestart(stage);
-  }
-
-  @Value
-  class TaskDefinition {
-    String name;
-    Class<? extends com.netflix.spinnaker.orca.Task> implementingClass;
   }
 
   class StageDefinitionBuilderSupport {

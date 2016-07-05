@@ -14,21 +14,18 @@
  * limitations under the License.
  */
 
-package com.netflix.spinnaker.orca.pipeline.parallel
+package com.netflix.spinnaker.orca.pipeline.parallel;
 
-import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
-import com.netflix.spinnaker.orca.pipeline.model.Execution
-import com.netflix.spinnaker.orca.pipeline.model.Stage
-import groovy.transform.CompileStatic
-import org.springframework.stereotype.Component
+import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder;
+import com.netflix.spinnaker.orca.pipeline.TaskNode.Builder;
+import com.netflix.spinnaker.orca.pipeline.model.Execution;
+import com.netflix.spinnaker.orca.pipeline.model.Stage;
+import org.springframework.stereotype.Component;
 
-@CompileStatic
 @Component
 class PipelineInitializationStage implements StageDefinitionBuilder {
   @Override
-  <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
-    return Collections.singletonList(
-      new StageDefinitionBuilder.TaskDefinition("initialize", PipelineInitializationTask)
-    );
+  public <T extends Execution<T>> void taskGraph(Stage<T> parentStage, Builder builder) {
+    builder.withTask("initialize", PipelineInitializationTask.class);
   }
 }

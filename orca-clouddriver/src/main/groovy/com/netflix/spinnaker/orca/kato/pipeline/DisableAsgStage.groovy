@@ -16,15 +16,15 @@
 
 package com.netflix.spinnaker.orca.kato.pipeline
 
+import groovy.transform.CompileStatic
 import com.netflix.spinnaker.orca.Task
 import com.netflix.spinnaker.orca.clouddriver.tasks.MonitorKatoTask
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.ServerGroupCacheForceRefreshTask
 import com.netflix.spinnaker.orca.kato.pipeline.support.TargetReferenceLinearStageSupport
-import com.netflix.spinnaker.orca.kato.tasks.*
-import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.kato.tasks.DisableAsgTask
+import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
-import groovy.transform.CompileStatic
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 
@@ -38,12 +38,11 @@ class DisableAsgStage extends TargetReferenceLinearStageSupport {
   Class<? extends Task> waitForAllInstancesDownOnDisableTaskType
 
   @Override
-  def <T extends Execution> List<StageDefinitionBuilder.TaskDefinition> taskGraph(Stage<T> parentStage) {
-    return [
-      new StageDefinitionBuilder.TaskDefinition("disableAsg", DisableAsgTask),
-      new StageDefinitionBuilder.TaskDefinition("monitorAsg", MonitorKatoTask),
-      new StageDefinitionBuilder.TaskDefinition("waitForDownInstances", waitForAllInstancesDownOnDisableTaskType),
-      new StageDefinitionBuilder.TaskDefinition("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
-    ]
+  <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
+    builder
+      .withTask("disableAsg", DisableAsgTask)
+      .withTask("monitorAsg", MonitorKatoTask)
+      .withTask("waitForDownInstances", waitForAllInstancesDownOnDisableTaskType)
+      .withTask("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
   }
 }

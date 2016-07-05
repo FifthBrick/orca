@@ -18,7 +18,7 @@ package com.netflix.spinnaker.orca.pipeline;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.TaskDefinition;
+import com.netflix.spinnaker.orca.pipeline.TaskNode.TaskDefinition;
 import com.netflix.spinnaker.orca.pipeline.model.DefaultTask;
 import com.netflix.spinnaker.orca.pipeline.model.Execution;
 import com.netflix.spinnaker.orca.pipeline.model.Stage;
@@ -27,6 +27,7 @@ import static com.google.common.collect.Lists.reverse;
 import static com.netflix.spinnaker.orca.ExecutionStatus.NOT_STARTED;
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_AFTER;
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE;
+import static java.lang.String.format;
 
 public abstract class ExecutionRunnerSupport implements ExecutionRunner {
   private final Collection<StageDefinitionBuilder> stageDefinitionBuilders;
@@ -43,7 +44,8 @@ public abstract class ExecutionRunnerSupport implements ExecutionRunner {
    * @param <T>       the execution type.
    * @throws Exception
    */
-  @Override public <T extends Execution<T>> void start(T execution) throws Exception {
+  @Override
+  public <T extends Execution<T>> void start(T execution) throws Exception {
     List<Stage<T>> stages = new ArrayList<>(execution.getStages()); // need to clone because we'll be modifying the list
     stages.stream().forEach(this::planStage);
   }
@@ -82,27 +84,51 @@ public abstract class ExecutionRunnerSupport implements ExecutionRunner {
       planStage(postStage);
     });
 
-    for (ListIterator<TaskDefinition> itr = builder.taskGraph(stage).listIterator(); itr.hasNext(); ) {
-      DefaultTask task = new DefaultTask();
-      task.setStageStart(!itr.hasPrevious());
+    TaskNode.TaskGraph taskGraph = builder.buildTaskGraph(stage);
+    planTasks(stage, taskGraph, false);
+  }
 
+  private <T extends Execution<T>> void planTasks(Stage<T> stage, TaskNode.TaskGraph taskGraph, boolean isSubGraph) {
+    for (ListIterator<TaskNode> itr = taskGraph.listIterator(); itr.hasNext(); ) {
+      boolean isStart = !itr.hasPrevious();
       // do this after calling itr.hasPrevious because ListIterator is stupid
-      TaskDefinition taskDef = itr.next();
+      TaskNode taskDef = itr.next();
+      boolean isEnd = !itr.hasNext();
 
-      task.setId(String.valueOf((stage.getTasks().size() + 1)));
-      task.setName(taskDef.getName());
-      task.setStatus(NOT_STARTED);
-      task.setImplementingClass(taskDef.getImplementingClass());
-      // TODO: may need to revisit this for parallel stages like bake & deploy
-      task.setStageEnd(!itr.hasNext());
-      stage.getTasks().add(task);
+      if (taskDef instanceof TaskDefinition) {
+        DefaultTask task = new DefaultTask();
+        if (isStart) {
+          if (isSubGraph) {
+            task.setLoopStart(true);
+          } else {
+            task.setStageStart(true);
+          }
+        }
+        task.setId(String.valueOf((stage.getTasks().size() + 1)));
+        task.setName(((TaskDefinition) taskDef).getName());
+        task.setStatus(NOT_STARTED);
+        task.setImplementingClass(((TaskDefinition) taskDef).getImplementingClass());
+        if (isEnd) {
+          if (isSubGraph) {
+            task.setLoopEnd(true);
+          } else {
+            // TODO: may need to revisit this for parallel stages like bake & deploy
+            task.setStageEnd(true);
+          }
+        }
+        stage.getTasks().add(task);
+      } else if (taskDef instanceof TaskNode.TaskGraph) {
+        planTasks(stage, (TaskNode.TaskGraph) taskDef, true);
+      } else {
+        throw new UnsupportedOperationException(format("Unknown TaskNode type %s", taskDef.getClass().getName()));
+      }
     }
   }
 
   private <T extends Execution<T>> StageDefinitionBuilder findBuilderForStage(Stage<T> stage) {
     return stageDefinitionBuilders
       .stream()
-      .filter(builder1 -> builder1.getType().equals(stage.getType()))
+      .filter(builder -> builder.getType().equals(stage.getType()))
       .findFirst()
       .orElseThrow(() -> new NoSuchStageDefinitionBuilder(stage.getType()));
   }
