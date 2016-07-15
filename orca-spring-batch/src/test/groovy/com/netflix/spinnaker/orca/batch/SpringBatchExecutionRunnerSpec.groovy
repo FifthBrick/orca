@@ -24,7 +24,6 @@ import com.netflix.spinnaker.orca.Task
 import com.netflix.spinnaker.orca.batch.exceptions.ExceptionHandler
 import com.netflix.spinnaker.orca.batch.listeners.SpringBatchExecutionListenerProvider
 import com.netflix.spinnaker.orca.batch.listeners.SpringBatchStageListener
-import com.netflix.spinnaker.orca.listeners.ExecutionListener
 import com.netflix.spinnaker.orca.listeners.StageListener
 import com.netflix.spinnaker.orca.listeners.StageStatusPropagationListener
 import com.netflix.spinnaker.orca.listeners.StageTaskPropagationListener
@@ -41,15 +40,15 @@ import com.netflix.spinnaker.orca.pipeline.parallel.WaitForRequisiteCompletionTa
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
 import com.netflix.spinnaker.orca.test.batch.BatchTestConfiguration
-import org.springframework.batch.core.configuration.JobRegistry
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory
-import org.springframework.batch.core.launch.JobLauncher
+import org.spockframework.spring.xml.SpockMockFactoryBean
+import org.springframework.beans.factory.FactoryBean
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.context.ApplicationContext
-import org.springframework.context.annotation.AnnotationConfigApplicationContext
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.context.support.GenericApplicationContext
 import org.springframework.retry.backoff.Sleeper
-import spock.lang.Shared
+import org.springframework.test.annotation.DirtiesContext
+import org.springframework.test.context.ContextConfiguration
 import spock.lang.Subject
 import spock.lang.Unroll
 import static com.netflix.spinnaker.orca.ExecutionStatus.REDIRECT
@@ -61,74 +60,38 @@ import static com.netflix.spinnaker.orca.pipeline.TaskNode.TaskGraph
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_AFTER
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE
 import static org.hamcrest.Matchers.containsInAnyOrder
+import static org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD
 import static spock.util.matcher.HamcrestSupport.expect
 
+@ContextConfiguration(classes = [
+  BatchTestConfiguration, TaskTaskletAdapterImpl, StageNavigator,
+  WaitForRequisiteCompletionTask, SpringBatchExecutionListenerProvider,
+  MockTaskConfiguration, WaitForRequisiteCompletionStage
+])
+@DirtiesContext(classMode = AFTER_EACH_TEST_METHOD)
 class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
 
-  @Shared
-  def stageNavigator = new StageNavigator(Mock(ApplicationContext))
+  @Autowired GenericApplicationContext applicationContext
+  @Autowired TestTask testTask
+  @Autowired PreLoopTask preLoopTask
+  @Autowired StartLoopTask startLoopTask
+  @Autowired EndLoopTask endLoopTask
+  @Autowired PostLoopTask postLoopTask
 
-  def applicationContext = new AnnotationConfigApplicationContext()
-  @Autowired JobRegistry jobRegistry
-  @Autowired JobBuilderFactory jobs
-  @Autowired StepBuilderFactory steps
-  @Autowired TaskTaskletAdapter taskTaskletAdapter
-  @Autowired(required = false) Collection<Task> tasks = []
-  @Autowired(required = false) Collection<TestTask> mockTasks = []
+  @Autowired ExecutionRepository executionRepository
 
-  private Map<Class<? extends Task>, TestTask> getTasksByType() {
-    mockTasks.collectEntries { [(it.getClass()): it] }
-  }
-  @Autowired(required = false) Collection<StageListener> stageListeners = []
-  @Autowired(required = false)
-  Collection<ExecutionListener> executionListeners = []
-  @Autowired JobLauncher jobLauncher
-  def executionRepository = Stub(ExecutionRepository)
-
-  private void startContext(
-    @ClosureParams(
-      value = SimpleType,
-      options = "org.springframework.beans.factory.config.ConfigurableListableBeanFactory")
-      Closure withBeans) {
-    applicationContext.with {
-      register(BatchTestConfiguration, TaskTaskletAdapterImpl)
-      beanFactory.with {
-        registerSingleton("executionRepository", executionRepository)
-        registerSingleton("exceptionHandler", Mock(ExceptionHandler))
-        registerSingleton("stageBuilderProvider", Stub(StageBuilderProvider))
-        registerSingleton("stageNavigator", new StageNavigator(applicationContext))
-        registerSingleton("sleeper", Stub(Sleeper))
-        registerSingleton("waitForRequisiteCompletionTask", new WaitForRequisiteCompletionTask())
-        registerSingleton("stageStatusPropagationListener", new SpringBatchStageListener(executionRepository, new StageStatusPropagationListener()))
-        registerSingleton("stageTaskPropagationListener", new SpringBatchStageListener(executionRepository, new StageTaskPropagationListener()))
-      }
-      withBeans(beanFactory)
-      refresh()
-
-      beanFactory.autowireBean(this)
-    }
+  def setup() {
+    println "appcontext=" + System.identityHashCode(applicationContext)
   }
 
   @Override
   ExecutionRunner create(StageDefinitionBuilder... stageDefBuilders) {
-    startContext { beanFactory ->
-      beanFactory.registerSingleton("test", new TestTask(delegate: Mock(Task)))
-      beanFactory.registerSingleton("preLoop", new PreLoopTask(delegate: Mock(Task)))
-      beanFactory.registerSingleton("startLoop", new StartLoopTask(delegate: Mock(Task)))
-      beanFactory.registerSingleton("endLoop", new EndLoopTask(delegate: Mock(Task)))
-      beanFactory.registerSingleton("postLoop", new PostLoopTask(delegate: Mock(Task)))
+    applicationContext.with {
+      stageDefBuilders.each {
+        beanFactory.registerSingleton(it.type, it)
+      }
+      autowireCapableBeanFactory.createBean(SpringBatchExecutionRunner)
     }
-    return new SpringBatchExecutionRunner(
-      stageDefBuilders.toList() + [new WaitForRequisiteCompletionStage()],
-      executionRepository,
-      jobLauncher,
-      jobRegistry,
-      jobs,
-      steps,
-      taskTaskletAdapter,
-      tasks,
-      new SpringBatchExecutionListenerProvider(executionRepository, stageListeners, executionListeners)
-    )
   }
 
   @Unroll
@@ -148,7 +111,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     runner.start(execution)
 
     then:
-    1 * mockTasks[0].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    1 * testTask.execute(_) >> new DefaultTaskResult(SUCCEEDED)
 
     where:
     parallel | description
@@ -195,7 +158,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
 
     and:
     def executedStageTypes = []
-    mockTasks[0].delegate.execute(_) >> { Stage stage ->
+    testTask.execute(_) >> { Stage stage ->
       executedStageTypes << stage.type
       new DefaultTaskResult(SUCCEEDED)
     }
@@ -258,7 +221,7 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
 
     and:
     def executedStageTypes = []
-    mockTasks[0].delegate.execute(_) >> { Stage stage ->
+    testTask.execute(_) >> { Stage stage ->
       executedStageTypes << stage.type
       new DefaultTaskResult(SUCCEEDED)
     }
@@ -299,33 +262,29 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     runner.start(execution)
 
     then:
-    // TODO: make this a field
-    1 * tasksByType[PreLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
-    3 * tasksByType[StartLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
-    3 * tasksByType[EndLoopTask].delegate.execute(_) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(SUCCEEDED)
-    1 * tasksByType[PostLoopTask].delegate.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    1 * preLoopTask.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    3 * startLoopTask.execute(_) >> new DefaultTaskResult(SUCCEEDED)
+    3 * endLoopTask.execute(_) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(REDIRECT) >> new DefaultTaskResult(SUCCEEDED)
+    1 * postLoopTask.execute(_) >> new DefaultTaskResult(SUCCEEDED)
 
     where:
     execution = Pipeline.builder().withId("1").withParallel(true).build()
   }
 
   @CompileStatic
-  static class TestTask implements Task {
-    @Delegate
-    Task delegate
-  }
+  static interface TestTask extends Task {}
 
   @CompileStatic
-  static class PreLoopTask extends TestTask {}
+  static interface PreLoopTask extends Task {}
 
   @CompileStatic
-  static class StartLoopTask extends TestTask {}
+  static interface StartLoopTask extends Task {}
 
   @CompileStatic
-  static class EndLoopTask extends TestTask {}
+  static interface EndLoopTask extends Task {}
 
   @CompileStatic
-  static class PostLoopTask extends TestTask {}
+  static interface PostLoopTask extends Task {}
 
   @CompileStatic
   static StageDefinitionBuilder stageDefinition(
@@ -348,4 +307,58 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     }
   }
 
+  @Configuration
+  @CompileStatic
+  static class MockTaskConfiguration {
+    @Bean
+    FactoryBean<ExecutionRepository> executionRepository() {
+      new SpockMockFactoryBean(ExecutionRepository)
+    }
+
+    @Bean
+    FactoryBean<ExceptionHandler> exceptionHandler() {
+      new SpockMockFactoryBean(ExceptionHandler)
+    }
+
+    @Bean
+    FactoryBean<StageBuilderProvider> builderProvider() {
+      new SpockMockFactoryBean(StageBuilderProvider)
+    }
+
+    @Bean
+    FactoryBean<Sleeper> sleeper() { new SpockMockFactoryBean(Sleeper) }
+
+    @Bean
+    StageListener stageStatusPropagationListener(ExecutionRepository executionRepository) {
+      new SpringBatchStageListener(executionRepository, new StageStatusPropagationListener())
+    }
+
+    @Bean
+    StageListener stageTaskPropagationListener(ExecutionRepository executionRepository) {
+      new SpringBatchStageListener(executionRepository, new StageTaskPropagationListener())
+    }
+
+    @Bean
+    FactoryBean<TestTask> testTask() { new SpockMockFactoryBean(TestTask) }
+
+    @Bean
+    FactoryBean<PreLoopTask> preLoopTask() {
+      new SpockMockFactoryBean(PreLoopTask)
+    }
+
+    @Bean
+    FactoryBean<StartLoopTask> startLoopTask() {
+      new SpockMockFactoryBean(StartLoopTask)
+    }
+
+    @Bean
+    FactoryBean<EndLoopTask> endLoopTask() {
+      new SpockMockFactoryBean(EndLoopTask)
+    }
+
+    @Bean
+    FactoryBean<PostLoopTask> postLoopTask() {
+      new SpockMockFactoryBean(PostLoopTask)
+    }
+  }
 }

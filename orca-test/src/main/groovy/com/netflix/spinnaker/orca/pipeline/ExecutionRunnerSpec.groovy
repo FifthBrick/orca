@@ -31,7 +31,10 @@ abstract class ExecutionRunnerSpec<R extends ExecutionRunner> extends Specificat
 
   def "throws an exception if there's no builder for a stage type"() {
     given:
-    @Subject def runner = create()
+    def stageDefBuilder = Stub(StageDefinitionBuilder) {
+      getType() >> stageType.reverse()
+    }
+    @Subject def runner = create(stageDefBuilder)
 
     when:
     runner.start(execution)

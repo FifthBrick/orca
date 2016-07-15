@@ -43,7 +43,9 @@ import org.springframework.batch.core.launch.NoSuchJobException;
 import org.springframework.batch.core.listener.StepExecutionListenerSupport;
 import org.springframework.batch.core.step.builder.TaskletStepBuilder;
 import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.stereotype.Component;
 import static com.google.common.collect.Iterables.indexOf;
 import static com.google.common.collect.Maps.newHashMap;
 import static com.netflix.spinnaker.orca.ExecutionStatus.NOT_STARTED;
@@ -56,6 +58,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonMap;
 import static java.util.stream.Collectors.toList;
 
+@Component
 @Slf4j
 public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
 
@@ -70,6 +73,7 @@ public class SpringBatchExecutionRunner extends ExecutionRunnerSupport {
   private final Collection<com.netflix.spinnaker.orca.Task> tasks;
   private final ExecutionListenerProvider executionListenerProvider;
 
+  @Autowired
   public SpringBatchExecutionRunner(
     Collection<StageDefinitionBuilder> stageDefinitionBuilders,
     ExecutionRepository executionRepository,
