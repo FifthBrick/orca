@@ -17,6 +17,7 @@
 package com.netflix.spinnaker.orca.pipeline
 
 import java.text.SimpleDateFormat
+import groovy.transform.CompileStatic
 import com.netflix.spinnaker.config.SpringBatchConfiguration
 import com.netflix.spinnaker.orca.Task
 import com.netflix.spinnaker.orca.batch.lifecycle.AbstractBatchLifecycleSpec
@@ -27,13 +28,18 @@ import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
 import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
 import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.parallel.ParallelCompletionSpec
 import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
 import com.netflix.spinnaker.orca.test.TestConfiguration
 import com.netflix.spinnaker.orca.test.redis.EmbeddedRedisConfiguration
+import org.spockframework.spring.xml.SpockMockFactoryBean
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.job.builder.JobBuilder
+import org.springframework.beans.factory.FactoryBean
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationContext
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
 import org.springframework.context.support.AbstractApplicationContext
 import org.springframework.test.context.ContextConfiguration
 import spock.lang.Shared
@@ -44,14 +50,17 @@ import static com.netflix.spinnaker.orca.pipeline.RestrictExecutionDuringTimeWin
 import static com.netflix.spinnaker.orca.pipeline.RestrictExecutionDuringTimeWindow.SuspendExecutionDuringTimeWindowTask.TimeWindow
 
 @Unroll
-@ContextConfiguration(classes = [EmbeddedRedisConfiguration, JesqueConfiguration, OrcaConfiguration, TestConfiguration, SpringBatchConfiguration])
+@ContextConfiguration(classes = [
+  EmbeddedRedisConfiguration, JesqueConfiguration, OrcaConfiguration,
+  TestConfiguration, SpringBatchConfiguration, TestConfig
+])
 class RestrictExecutionDuringTimeWindowSpec extends AbstractBatchLifecycleSpec {
 
   @Shared
   def stageNavigator = new StageNavigator(Mock(ApplicationContext))
 
   @Autowired AbstractApplicationContext applicationContext;
-  def task = new TestTask(delegate: Mock(Task))
+  @Autowired TestTask task
 
   boolean initialized
 
@@ -179,31 +188,18 @@ class RestrictExecutionDuringTimeWindowSpec extends AbstractBatchLifecycleSpec {
 
   @Override
   protected Job configureJob(JobBuilder jobBuilder) {
-    applicationContext.beanFactory.with {
-      try {
-        getBean(task.class)
-      } catch (NoSuchBeanDefinitionException) {
-        registerSingleton("task1", task)
-      }
-    }
-
     def stage = pipeline.namedStage("stage2")
     def builder = jobBuilder.flow(initializationStep(steps, pipeline))
     def stageBuilder = new SpringBatchStageBuilderProvider(applicationContext, [], []).wrap(
-      new InjectStageBuilder(applicationContext)
+      new InjectStageBuilder()
     )
     stageBuilder.build(builder, stage).build().build()
   }
 
-  private class InjectStageBuilder implements StageDefinitionBuilder {
-    InjectStageBuilder(ApplicationContext applicationContext) {
-      setApplicationContext(applicationContext)
-    }
-
+  private static class InjectStageBuilder implements StageDefinitionBuilder {
     @Override
     <T extends Execution<T>> void taskGraph(Stage<T> parentStage, TaskNode.Builder builder) {
-      builder
-        .withTask("step", task.class)
+      builder.withTask("step", TestTask)
     }
 
     @Override
@@ -243,8 +239,11 @@ class RestrictExecutionDuringTimeWindowSpec extends AbstractBatchLifecycleSpec {
     return new PipelineStage(pipeline, "testRestrictExecution", context)
   }
 
-  static class TestTask implements Task {
-    @Delegate
-    Task delegate
+  static interface TestTask extends Task {}
+
+  @CompileStatic
+  static class TestConfig {
+    @Bean
+    FactoryBean<TestTask> testTask() { new SpockMockFactoryBean<>(TestTask)}
   }
 }

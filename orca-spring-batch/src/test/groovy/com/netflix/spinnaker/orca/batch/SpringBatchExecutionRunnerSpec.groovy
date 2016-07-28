@@ -307,7 +307,6 @@ class SpringBatchExecutionRunnerSpec extends ExecutionRunnerSpec {
     }
   }
 
-  @Configuration
   @CompileStatic
   static class MockTaskConfiguration {
     @Bean

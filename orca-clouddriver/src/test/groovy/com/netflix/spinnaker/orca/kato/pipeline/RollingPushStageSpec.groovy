@@ -129,7 +129,6 @@ class RollingPushStageSpec extends Specification {
     configJson = mapper.writeValueAsString(config)
   }
 
-  @Configuration
   static class MockTaskConfig {
     @Bean
     @Qualifier("preLoop")
