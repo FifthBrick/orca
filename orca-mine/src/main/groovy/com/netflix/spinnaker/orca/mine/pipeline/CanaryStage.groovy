@@ -33,12 +33,14 @@ import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.StageDe
 @Slf4j
 @Component
 class CanaryStage implements StageDefinitionBuilder, CancellableStage {
+  public static final String PIPELINE_CONFIG_TYPE = "canary"
+
   @Autowired DeployCanaryStage deployCanaryStage
   @Autowired MonitorCanaryStage monitorCanaryStage
   @Autowired ShrinkClusterTask shrinkClusterTask
 
   @Override
-  def <T extends Execution> List<Stage<T>> aroundStages(Stage<T> parentStage) {
+  def <T extends Execution<T>> List<Stage<T>> aroundStages(Stage<T> parentStage) {
     Map canaryStageId = [canaryStageId: parentStage.id]
 
     Map<String, Object> deployContext = canaryStageId + parentStage.context
